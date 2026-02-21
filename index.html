@@ -301,10 +301,31 @@ function buildStageDefs(){
 const STAGES = buildStageDefs();
 
 /*** ==========
- * PERSISTENCE
+ * SAFE STORAGE WRAPPER + NAMESPACE
  * ========== */
-const STORAGE_KEY_PREFIX = 'multistage_user_';
 
+// Namespace keys per repo path on GitHub Pages to avoid collisions
+const _repoSlug = (location.pathname.split('/')[1] || '').toLowerCase(); // "your-repo"
+const STORAGE_KEY_PREFIX = `multijourney_${_repoSlug}_user_`;
+
+// Guarded localStorage access (prevents crashes if storage is blocked)
+function lsAvailable() {
+  try {
+    const x = '__ls_test__' + Math.random().toString(36).slice(2);
+    localStorage.setItem(x, '1');
+    localStorage.removeItem(x);
+    return true;
+  } catch (e) { return false; }
+}
+const LS_OK = lsAvailable();
+
+function lsGet(key){ if (!LS_OK) return null; try { return localStorage.getItem(key); } catch { return null; } }
+function lsSet(key,val){ if (!LS_OK) return false; try { localStorage.setItem(key,val); return true; } catch { return false; } }
+function lsRemove(key){ if (!LS_OK) return; try { localStorage.removeItem(key); } catch {} }
+
+/*** ==========
+ * PERSISTENCE (uses wrapper)
+ * ========== */
 function migrateStages(profile){
   const oldStages = Array.isArray(profile.stages) ? profile.stages : [];
   const newStages = STAGES.map(def => {
@@ -329,7 +350,7 @@ function migrateStages(profile){
 
 function loadUser(userId){
   const key = STORAGE_KEY_PREFIX + userId;
-  const saved = localStorage.getItem(key);
+  const saved = lsGet(key);
   if (saved){
     try {
       const profile = JSON.parse(saved);
@@ -356,7 +377,7 @@ function loadUser(userId){
 
 function saveUser(profile){
   const key = STORAGE_KEY_PREFIX + profile.userId;
-  localStorage.setItem(key, JSON.stringify(profile));
+  lsSet(key, JSON.stringify(profile));
 }
 
 /*** ==========
@@ -399,30 +420,8 @@ const app = {
   stats:{ correct:0, incorrect:0, logCorrect:[], logIncorrect:[] },
 };
 
-/*** ==========
- * DECK / FACTS
- * ========== */
-function collectTables(def){
-  if (def.tables) return [...def.tables];
-  if (def.range){
-    const [a,b]=def.range, out=[];
-    for (let n=a;n<=b;n++) out.push(n);
-    return out;
-  }
-  return [];
-}
-
-function buildDeckForStage(stageDef){
-  const tables = collectTables(stageDef);
-  const facts = [];
-  for (const a of tables){
-    for (let b=FACTOR_MIN; b<=FACTOR_MAX; b++){
-      facts.push({ a, b, answer: a*b, key:`${a}×${b}` });
-    }
-  }
-  shuffle(facts);
-  return facts;
-}
+let tickHandle = null;
+let currentCard = null;
 
 /*** ==========
  * SCREENS
@@ -536,8 +535,45 @@ function startStage(stageIndex){
   nextCard();
 }
 
-let tickHandle = null;
+function buildDeckForStage(stageDef){
+  const tables = collectTables(stageDef);
+  const facts = [];
+  for (const a of tables){
+    for (let b=FACTOR_MIN; b<=FACTOR_MAX; b++){
+      facts.push({ a, b, answer: a*b, key:`${a}×${b}` });
+    }
+  }
+  shuffle(facts);
+  return facts;
+}
 
+function collectTables(def){
+  if (def.tables) return [...def.tables];
+  if (def.range){
+    const [a,b]=def.range, out=[];
+    for (let n=a;n<=b;n++) out.push(n);
+    return out;
+  }
+  return [];
+}
+
+function nextCard(){
+  stopTimer();
+  if (app.deck.length === 0){
+    return finishStage();
+  }
+  currentCard = app.deck[0];
+  $('#factText').textContent = `${currentCard.a} × ${currentCard.b} = ?`;
+  $('#answer').disabled = false;
+  $('#btnSubmit').disabled = false;
+  $('#answer').focus();
+  $('#feedback').textContent = '';
+  startTimer(app.currentStage.sec);
+}
+
+/*** ==========
+ * TIMER
+ * ========== */
 function startTimer(seconds){
   app.timerTotalMs = seconds*1000;
   app.timerEndsAt = performance.now() + app.timerTotalMs;
@@ -554,26 +590,12 @@ function startTimer(seconds){
   };
   tickHandle = requestAnimationFrame(tick);
 }
-
 function stopTimer(){ if (tickHandle) cancelAnimationFrame(tickHandle); tickHandle = null; }
-
 function updateTimerBar(){
   const now = performance.now();
   const remaining = Math.max(0, app.timerEndsAt - now);
   const pct = Math.max(0, Math.min(1, remaining / app.timerTotalMs));
   $('#timerBar').style.width = (pct*100)+'%';
-}
-
-let currentCard = null;
-
-function nextCard(){
-  stopTimer();
-  if (app.deck.length === 0){ return finishStage(); }
-  currentCard = app.deck[0];
-  $('#factText').textContent = `${currentCard.a} × ${currentCard.b} = ?`;
-  $('#answer').disabled = false; $('#btnSubmit').disabled = false;
-  $('#answer').focus(); $('#feedback').textContent = '';
-  startTimer(app.currentStage.sec);
 }
 
 /* ====== Force-submit at timeout ====== */
@@ -663,6 +685,7 @@ function finishStage(){
   const badge = $('#flawlessBadge');
   badge.innerHTML = flawless ? '⭐ This run was flawless!' : '';
 
+  // record progress
   const st = app.user.stages[s.index];
   st.attempts++;
   const run = {
@@ -709,7 +732,7 @@ $('#btnLogout').addEventListener('click', ()=> logoutUser());
 $('#btnReset').addEventListener('click', ()=>{
   if (!app.user) return;
   if (confirm('Reset ALL progress for this user?')){
-    localStorage.removeItem(STORAGE_KEY_PREFIX + app.user.userId);
+    lsRemove(STORAGE_KEY_PREFIX + app.user.userId);
     app.user = loadUser(app.user.userId);
     renderBoard();
   }
