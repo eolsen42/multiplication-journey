@@ -21,7 +21,6 @@
     --tile-bg-2:#120e0c;
   }
 
-  /* Top-aligned page; scrolls inside the iframe if needed */
   html, body { height: 100%; }
   *{ box-sizing: border-box }
   body{
@@ -165,12 +164,32 @@
       <h2 class="muted">Log in with your student number</h2>
       <div class="row">
         <input id="loginId" type="number" inputmode="numeric" placeholder="Enter ID (numbers only)" class="grow" />
-        <button id="btnLogin" class="primary">Continue</button>
+      </div>
+      <div class="row">
+        <input id="loginPw" type="password" placeholder="Enter password" class="grow" />
       </div>
       <div class="row" style="justify-content:flex-end">
-        <button id="btnDemo" class="secondary">Quick Demo User</button>
+        <button id="btnLogin" class="primary">Continue</button>
       </div>
       <p class="muted">Progress is saved on this device for each ID.</p>
+    </div>
+  </section>
+
+  <!-- POLICY (NEW) -->
+  <section id="screen-policy" class="screen">
+    <div class="card stack">
+      <h1>📣 Before You Start</h1>
+      <p class="muted">
+        You <b>can’t quit mid‑stage</b>. Play each stage all the way through and work every problem—
+        that’s how you actually <b>learn</b> these math facts. 💪
+      </p>
+      <p class="muted">
+        When you begin a stage, stick with it until you finish the deck. If you make a mistake,
+        that card goes to the bottom and you’ll see it again soon.
+      </p>
+      <div class="row" style="justify-content:flex-end">
+        <button id="btnPolicyContinue" class="primary">I understand — Take me to the Stage Board</button>
+      </div>
     </div>
   </section>
 
@@ -219,10 +238,7 @@
         </div>
       </div>
 
-      <div class="row" style="justify-content:space-between">
-        <button id="btnQuit" class="secondary">Exit to Board</button>
-        <span class="muted">Tip: press <b>Enter</b> to submit</span>
-      </div>
+      <!-- Removed the "Exit to Board" button row per request -->
     </div>
   </section>
 
@@ -245,7 +261,8 @@
 
       <div class="row" style="justify-content:space-between">
         <div class="row" style="gap:8px">
-          <button id="btnRetry" class="primary">Try This Stage Again</button>
+          <!-- Both buttons use the same color (secondary). "Try" is hidden when run is flawless. -->
+          <button id="btnRetry" class="secondary">Try This Stage Again</button>
           <button id="btnNext" class="secondary">Back to Board</button>
         </div>
         <div id="flawlessBadge" class="muted"></div>
@@ -452,6 +469,7 @@ function renderBoard(){
     label.textContent = def.label;
     tile.appendChild(label);
 
+    // Status pill row
     const statusRow = document.createElement('div');
     statusRow.className = 'status-row';
     const pill = document.createElement('span');
@@ -466,15 +484,9 @@ function renderBoard(){
     statusRow.appendChild(pill);
     tile.appendChild(statusRow);
 
-    if (s.bestRun){
-      const br = document.createElement('div');
-      br.className = 'tile-label';
-      const ms = s.bestRun.totalTimeMs ?? 0;
-      const secs = (ms/1000).toFixed(1);
-      br.textContent = `Best run: ${s.bestRun.correct}✓ / ${s.bestRun.incorrect}✗ · ${secs}s`;
-      tile.appendChild(br);
-    }
+    // (Removed) best run detail line per request
 
+    // Actions
     const actions = document.createElement('div');
     actions.className = 'tile-actions';
 
@@ -504,16 +516,17 @@ function renderBoard(){
   });
 }
 
+/*** ==========
+ * LOGIN / POLICY
+ * ========== */
 function loginUser(id){
   app.user = loadUser(id);
   saveUser(app.user);
-  showScreen('#screen-progress');
-  renderBoard();
 }
 
-function logoutUser(){
-  app.user = null;
-  showScreen('#screen-login');
+function goToBoard(){
+  showScreen('#screen-progress');
+  renderBoard();
 }
 
 /*** ==========
@@ -685,7 +698,15 @@ function finishStage(){
   const badge = $('#flawlessBadge');
   badge.innerHTML = flawless ? '⭐ This run was flawless!' : '';
 
-  // record progress
+  // Show/hide Try button depending on flawless
+  const btnRetry = $('#btnRetry');
+  if (flawless){
+    btnRetry.style.display = 'none';
+  } else {
+    btnRetry.style.display = '';
+  }
+
+  // record progress (unchanged)
   const st = app.user.stages[s.index];
   st.attempts++;
   const run = {
@@ -719,16 +740,25 @@ window.addEventListener('load', applyResponsive);
 /*** ==========
  * EVENT WIRING
  * ========== */
+// Login + password "220"
 $('#btnLogin').addEventListener('click', ()=>{
   const id = $('#loginId').value.trim();
+  const pw = $('#loginPw').value.trim();
   if (!/^\d+$/.test(id)){ alert('Please enter numbers only for the ID.'); return; }
+  if (pw !== '220'){ alert('Incorrect password.'); return; }
   loginUser(id);
+  showScreen('#screen-policy'); // go to policy screen before the board
 });
-$('#btnDemo').addEventListener('click', ()=>{
-  $('#loginId').value = '42';
-  $('#btnLogin').click();
+
+$('#btnPolicyContinue').addEventListener('click', ()=>{
+  goToBoard();
 });
-$('#btnLogout').addEventListener('click', ()=> logoutUser());
+
+$('#btnLogout').addEventListener('click', ()=> {
+  app.user = null;
+  showScreen('#screen-login');
+});
+
 $('#btnReset').addEventListener('click', ()=>{
   if (!app.user) return;
   if (confirm('Reset ALL progress for this user?')){
@@ -737,13 +767,10 @@ $('#btnReset').addEventListener('click', ()=>{
     renderBoard();
   }
 });
+
 $('#btnSubmit').addEventListener('click', submitAnswer);
 $('#answer').addEventListener('keydown', (e)=>{ if (e.key==='Enter') submitAnswer(); });
-$('#btnQuit').addEventListener('click', ()=>{
-  stopTimer();
-  showScreen('#screen-progress');
-  renderBoard();
-});
+
 $('#btnRetry').addEventListener('click', ()=>{ startStage(app.currentStage.index); });
 $('#btnNext').addEventListener('click', ()=>{
   showScreen('#screen-progress');
